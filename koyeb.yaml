@@ -1,0 +1,35 @@
+# ===== Koyeb 部署（GitHub 方式）=====
+# 用法：把本目录（H:\fly-test\koyeb）推到 GitHub 仓库，再在 Koyeb 选择该仓库即可。
+# Koyeb 控制台 → Create Service → GitHub → 选仓库 → Dockerfile 路径 koyeb/Dockerfile
+# 端口：8000 / Instance: Free / Region: was (Washington) 或 fra (Frankfurt)
+
+name: lcs-script-test
+
+services:
+  - name: lcs-script-test
+    type: web
+    instance_types:
+      - type: free
+    regions:
+      - was
+    ports:
+      - port: 8000
+        protocol: http
+    routes:
+      - path: /
+        port: 8000
+    scaling:
+      min: 1
+      max: 1
+    health_checks:
+      - grace_period: 10
+        interval: 30
+        restart_limit: 3
+        timeout: 5
+        tcp:
+          port: 8000
+    env:
+      - key: PORT
+        value: "8000"
+# 注：这是 Koyeb 定义文件格式示例。若控制台拒绝 YAML 方式，
+# 直接按 README 的网页步骤点选即可，参数与上方一致。
