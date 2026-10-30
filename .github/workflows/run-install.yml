@@ -1,0 +1,86 @@
+﻿name: run-install-script
+
+on:
+  workflow_dispatch:
+    inputs:
+      script_url:
+        description: '安装脚本 URL（留空则用仓库内 scripts/install-demo.sh）'
+        required: false
+        default: ''
+      keep_container:
+        description: '执行完后保留环境 10 分钟供 SSH 调试'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  test:
+    name: test-install-script
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境概览
+        run: |
+          uname -a
+          echo "--- cpu/mem/disk ---"
+          nproc; free -m; df -h /
+          echo "--- sudo ---"
+          sudo -n true && echo "sudo OK (root 可用)"
+
+      - name: 准备脚本
+        run: |
+          mkdir -p scripts out
+          URL="${{ inputs.script_url }}"
+          if [ -n "$URL" ]; then
+            curl -fsSL --retry 3 -o /tmp/install.sh "$URL"
+          else
+            cp scripts/install-demo.sh /tmp/install.sh
+          fi
+          chmod +x /tmp/install.sh
+          echo "===== 脚本头 40 行 ====="
+          head -n 40 /tmp/install.sh
+
+      - name: 执行安装脚本（记录退出码）
+        id: run
+        run: |
+          set +e
+          sudo -E bash /tmp/install.sh 2>&1 | tee out/install.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=$RC" >> "$GITHUB_OUTPUT"
+          echo "===== 退出码: $RC ====="
+          [ "$RC" -eq 0 ] || echo "::error::安装脚本失败，退出码 $RC"
+
+      - name: 采集环境快照
+        if: always()
+        run: |
+          {
+            echo "## 运行环境"
+            uname -a; nproc; free -m; df -h /
+            echo "## 已安装的关键包"
+            dpkg -l | awk '/^ii/{print $2, $3}' | grep -Ei 'nginx|docker|python3|nodejs|redis|mysql|postgres' || true
+            echo "## 监听端口"
+            ss -tlnp || true
+            echo "## systemd 单元状态"
+            systemctl --failed --no-pager || true
+          } > out/env-snapshot.txt 2>&1
+          cat out/env-snapshot.txt
+
+      - name: 上传日志与快照
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-evidence
+          path: out/
+          retention-days: 14
+
+      - name: 结论
+        run: |
+          RC="${{ steps.run.outputs.exit_code }}"
+          if [ "$RC" = "0" ]; then
+            echo "::notice title=执行成功::安装脚本退出码 0，日志见 artifact install-evidence"
+          else
+            echo "::error title=执行失败::退出码 $RC"
+            exit 1
+          fi
